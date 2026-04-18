@@ -15,6 +15,7 @@ TEST_CSV = BASE_DIR / "sign_mnist_test.csv"
 MODEL_PATH = BASE_DIR / "sign_model.h5"
 LABEL_MAP_PATH = BASE_DIR / "label_map.json"
 EXTERNAL_TEST_DIR = Path(r"C:\Users\Admin\Downloads\archive (1)\asl_alphabet_test")
+ZERO_AS_O_DIR = Path(r"C:\Users\Admin\Downloads\archive (2)\Sign Language for Numbers\0")
 
 RAW_LABELS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]
 DISPLAY_LABELS = [
@@ -206,6 +207,31 @@ def load_external_images(external_dir: Path):
     return np.stack(images).astype("float32"), np.array(labels, dtype="int32")
 
 
+def load_zero_as_o_images(zero_dir: Path):
+    if not zero_dir.exists():
+        print(f"Zero-sign folder not found at {zero_dir}. Skipping extra O-class adaptation.")
+        return np.empty((0, 28, 28, 1), dtype="float32"), np.empty((0,), dtype="int32")
+
+    images: list[np.ndarray] = []
+    labels: list[int] = []
+    o_index = DISPLAY_TO_INDEX["O"]
+
+    for image_path in sorted(zero_dir.glob("*.jpg")):
+        image = cv2.imread(str(image_path))
+        if image is None:
+            continue
+        roi = crop_largest_hand_like_region(image)
+        processed = preprocess_external_roi(roi)
+        images.append(processed)
+        labels.append(o_index)
+
+    if not images:
+        return np.empty((0, 28, 28, 1), dtype="float32"), np.empty((0,), dtype="int32")
+
+    print(f"Loaded {len(images)} zero-sign images and mapped them to class O.")
+    return np.stack(images).astype("float32"), np.array(labels, dtype="int32")
+
+
 def augment_external_samples(x_extra: np.ndarray, y_extra: np.ndarray, copies_per_image: int = 64):
     if len(x_extra) == 0:
         return x_extra, y_extra
@@ -272,6 +298,7 @@ def main() -> None:
     x_train, y_train = load_data(TRAIN_CSV)
     x_test, y_test = load_data(TEST_CSV)
     x_extra, y_extra = load_external_images(EXTERNAL_TEST_DIR)
+    x_zero_o, y_zero_o = load_zero_as_o_images(ZERO_AS_O_DIR)
 
     model = build_model()
     training_callbacks = [
@@ -296,9 +323,20 @@ def main() -> None:
     print(f"Base validation accuracy: {base_accuracy:.2%}")
     print(f"Base validation loss: {base_loss:.4f}")
 
+    domain_x_parts = []
+    domain_y_parts = []
     if len(x_extra) > 0:
-        print(f"Loaded {len(x_extra)} external ASL images for domain adaptation.")
-        x_extra_aug, y_extra_aug = augment_external_samples(x_extra, y_extra, copies_per_image=96)
+        domain_x_parts.append(x_extra)
+        domain_y_parts.append(y_extra)
+    if len(x_zero_o) > 0:
+        domain_x_parts.append(x_zero_o)
+        domain_y_parts.append(y_zero_o)
+
+    if domain_x_parts:
+        x_domain = np.concatenate(domain_x_parts, axis=0)
+        y_domain = np.concatenate(domain_y_parts, axis=0)
+        print(f"Loaded {len(x_domain)} real-image samples for domain adaptation.")
+        x_extra_aug, y_extra_aug = augment_external_samples(x_domain, y_domain, copies_per_image=96)
 
         sample_size = min(len(x_train), max(len(x_extra_aug) // 4, len(x_extra)))
         sample_indices = np.random.default_rng(123).choice(len(x_train), size=sample_size, replace=False)
