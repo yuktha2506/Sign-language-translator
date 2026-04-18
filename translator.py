@@ -170,10 +170,14 @@ def preprocess_hand_roi(roi: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel, iterations=1)
     thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel, iterations=2)
 
-    resized_gray = cv2.resize(gray, (ROI_SIZE, ROI_SIZE))
-    normalized = resized_gray.astype("float32") / 255.0
+    # FIX: feed `thresh` (binary mask) into the model instead of raw `gray`.
+    # This matches the preprocessing used during external-image domain adaptation
+    # in train_model.py and ensures consistent train/inference input distribution.
+    resized_thresh = cv2.resize(thresh, (ROI_SIZE, ROI_SIZE))
+    normalized = resized_thresh.astype("float32") / 255.0
     model_input = normalized.reshape(1, ROI_SIZE, ROI_SIZE, 1)
 
+    # Preview: left panel = equalized gray, right panel = binary mask
     preview_left = cv2.resize(gray, (PREVIEW_SIZE, PREVIEW_SIZE), interpolation=cv2.INTER_NEAREST)
     preview_right = cv2.resize(thresh, (PREVIEW_SIZE, PREVIEW_SIZE), interpolation=cv2.INTER_NEAREST)
     preview = np.hstack([preview_left, preview_right])
